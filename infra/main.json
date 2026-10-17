@@ -1,0 +1,165 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.48.1.52935",
+      "templateHash": "15221982313795600496"
+    }
+  },
+  "parameters": {
+    "env": {
+      "type": "string",
+      "allowedValues": [
+        "dev",
+        "test",
+        "prod"
+      ]
+    },
+    "appName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 40
+    },
+    "greeting": {
+      "type": "string",
+      "defaultValue": "Hello"
+    },
+    "appVersion": {
+      "type": "string",
+      "defaultValue": "manual"
+    },
+    "logRetentionDays": {
+      "type": "int",
+      "defaultValue": 30
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    }
+  },
+  "variables": {
+    "stName": "[format('st{0}', uniqueString(resourceGroup().id))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('stName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2022-10-01",
+      "name": "[format('log-{0}', parameters('appName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": "[parameters('logRetentionDays')]"
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[format('appi-{0}', parameters('appName'))]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', format('log-{0}', parameters('appName')))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('log-{0}', parameters('appName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2023-01-01",
+      "name": "[format('plan-{0}', parameters('appName'))]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic"
+      },
+      "kind": "linux",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('appName')]",
+      "location": "[parameters('location')]",
+      "kind": "functionapp,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', format('plan-{0}', parameters('appName')))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "linuxFxVersion": "Python|3.11",
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "appSettings": [
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};EndpointSuffix={1};AccountKey={2}', variables('stName'), environment().suffixes.storage, listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('stName')), '2023-01-01').keys[0].value)]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~4"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "python"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[reference(resourceId('Microsoft.Insights/components', format('appi-{0}', parameters('appName'))), '2020-02-02').ConnectionString]"
+            },
+            {
+              "name": "APP_ENV",
+              "value": "[parameters('env')]"
+            },
+            {
+              "name": "GREETING",
+              "value": "[parameters('greeting')]"
+            },
+            {
+              "name": "APP_VERSION",
+              "value": "[parameters('appVersion')]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', format('appi-{0}', parameters('appName')))]",
+        "[resourceId('Microsoft.Web/serverfarms', format('plan-{0}', parameters('appName')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "functionAppName": {
+      "type": "string",
+      "value": "[parameters('appName')]"
+    },
+    "healthUrl": {
+      "type": "string",
+      "value": "[format('https://{0}/api/health', reference(resourceId('Microsoft.Web/sites', parameters('appName')), '2023-01-01').defaultHostName)]"
+    }
+  }
+}
