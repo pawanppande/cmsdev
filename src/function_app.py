@@ -1,4 +1,5 @@
-import json, os
+import json
+import os
 import azure.functions as func
 from logic import make_greeting
 
